@@ -5,10 +5,12 @@ Plataforma independiente de estudio para el examen de conocimientos de aspirante
 ## Fuente académica única
 **Guía de Estudios del Proceso Electoral Local Ordinario 2026–2027**, elaborada por el Centro de Estudios de Opinión y Análisis de la Universidad Veracruzana, octubre de 2026.
 
-El archivo completo, **Guia_estudio_2026.pdf** (127 páginas), está incluido en este repositorio. Los fundamentos de las respuestas se comprueban contra el texto del PDF aportado; no se utilizan leyes ni fuentes externas.
+El archivo completo, **Guia_estudio_2026.pdf** (127 páginas), está incluido en este repositorio. Los fundamentos de las respuestas se comprueban contra el texto del PDF aportado; no se utilizan leyes ni fuentes externas. Los distractores de las preguntas nuevas son ejercicios didácticos elaborados a partir de otras disposiciones de la guía; no constituyen reactivos oficiales, y una verificación automática de las citas no sustituye la revisión jurídica editorial de cada pregunta.
 
-## Versión 2
-- **455 reactivos didácticos de conocimiento, identificación normativa y aplicación, con referencias contrastadas contra la guía: 253 de conocimiento, 119 de identificación de artículos y 83 de aplicación.
+## Versión 3
+- **455 reactivos didácticos**: 253 de conocimiento, 119 de identificación de artículos y 83 de aplicación.
+- **Cobertura:** 117 páginas del PDF y 163 artículos diferentes (de 173 artículos catalogados).
+- **Seguimiento:** artículos con preguntas, evaluados y dominados, junto con historial individual y selección prioritaria de preguntas no contestadas.
 - Cuatro opciones y una explicación con artículo/ordenamiento, evidencia literal y página del PDF.
 - Preguntas autónomas, sin encabezados que revelen la respuesta y sin fragmentos truncados.
 - Estudio completo de los nueve apartados normativos, buscador y seguimiento de apartados estudiados.
