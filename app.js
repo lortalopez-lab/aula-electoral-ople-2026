@@ -1,138 +1,83 @@
 (()=>{
 'use strict';
-const P=window.OPLE_PAGES||[];
-const names=['Constitución Política de los Estados Unidos Mexicanos','Ley General de Instituciones y Procedimientos Electorales','Ley General en Materia de Delitos Electorales','Reglamento de Elecciones del Instituto Nacional Electoral','Código Número 577 Electoral para el Estado de Veracruz','Ley General de Partidos Políticos','Reglamento de Sesiones de los Órganos Colegiados del OPLE Veracruz','Reglamento Interior del OPLE Veracruz','Reglamento para la Designación y Remoción de Funcionarios de Consejos Distritales y Municipales del OPLE Veracruz'];
-const begins=[9,20,37,46,66,96,103,118,124];
-const sections=names.map((name,i)=>({id:i,name,from:begins[i],to:(begins[i+1]||128)-1,pages:P.filter(p=>p.p>=begins[i]&&p.p<(begins[i+1]||128))}));
-const KEY='ople-exclusivo-v3';
-let state;try{state=JSON.parse(localStorage.getItem(KEY)||'{}')}catch{state={}}
-state.history=Array.isArray(state.history)?state.history:[];
-state.misses=state.misses||{};
-let session=null,view='inicio',timer=null;
-const $=s=>document.querySelector(s);
+const DATA=window.OPLE_STUDY_DATA;
+const PAGES=window.OPLE_PAGES||[];
+if(!DATA?.questions?.length){document.getElementById('root').textContent='No se pudo cargar el banco de estudio.';return}
+const Q=DATA.questions,MODS=DATA.modules,INDEX=new Map(Q.map(q=>[q.id,q]));
+const USERS=['Rosario','LuisOrta'];
+const APP_VERSION='ople2026-v2';
+const activeStorage='ople-active-tab-v2';
+const server=window.OPLE_SYNC_CONFIG||{};
+const CLOUD=Boolean(/^https:\/\/[a-z\d.-]+\.supabase\.co\/?$/i.test((server.url||'').replace(/\/$/,''))&&server.publishableKey?.startsWith('sb_publishable_'));
+let user=sessionStorage.getItem(activeStorage),state=null,page='inicio',timer=null,syncTimer=null,cloudLock=false,status=CLOUD?'Conectando…':'Solo en este dispositivo';
+let filterTopic='all',filterSize=20,filterType='all',searchText='';
+if(!USERS.includes(user))user=null;
+const root=document.getElementById('root');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const store=()=>localStorage.setItem(KEY,JSON.stringify(state));
-const hash=(s)=>{let h=2166136261;for(let c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0};
-const shuffle=(a,seed)=>a.map((v,i)=>({v,r:hash(seed+'|'+i+'|'+JSON.stringify(v).slice(0,50))})).sort((a,b)=>a.r-b.r).map(x=>x.v);
-function sanitize(s){return s.replace(/\s+/g,' ').replace(/^\W+/,'').trim()}
-function paragraphCandidates(sec){
-  let out=[];
-  for(let p of sec.pages){
-    let t=p.t||'';
-    let matches=[...t.matchAll(/(?:^|\n)\s*Art[ií]culo\s+(\d+[ºo]?)(?:\s*[\.\-:]|\s*\n)/gim)];
-    for(let i=0;i<matches.length;i++){
-      const m=matches[i],end=matches[i+1]?.index??t.length;
-      let body=t.slice(m.index+m[0].length,end).replace(/\[[^\]]{0,50}\]/g,' ').trim();
-      let candidate=body.split(/\n\s*\n/).map(sanitize).filter(s=>s.length>=90&&s.length<=600)[0];
-      if(!candidate) candidate=sanitize(body).slice(0,310);
-      if(candidate.length>=90)out.push({id:sec.id+'-'+p.p+'-'+m[1],section:sec.id,page:p.p,article:m[1],quote:candidate.slice(0,270)});
-    }
-    const blocks=t.split(/\n\s*\n/).map(sanitize).filter(s=>s.length>=140&&s.length<=900);
-    blocks.forEach((b,j)=>{if(!/^(?:GUÍA DE ESTUDIO|Página|Artículo\s+\d|CONTENIDO)/i.test(b))out.push({id:'p-'+sec.id+'-'+p.p+'-'+j,section:sec.id,page:p.p,article:null,quote:b.slice(0,250)})});
-  }
-  let seen=new Set();
-  return out.filter(x=>{let key=x.quote.slice(0,85).toLowerCase();if(seen.has(key))return false;seen.add(key);return true});
-}
-const raw=sections.map(paragraphCandidates);
-let bank=[], articlePools=raw.map(a=>[...new Set(a.filter(x=>x.article).map(x=>x.article))]);
-for(let i=0;i<sections.length;i++){
-  for(const item of raw[i]){
-    if(item.article&&articlePools[i].length>=4){
-      let wrong=shuffle(articlePools[i].filter(x=>x!==item.article),item.id).slice(0,3);
-      let options=shuffle([item.article,...wrong],item.id+'-a').map(x=>'Artículo '+x);
-      bank.push({id:'a-'+item.id,section:i,page:item.page,article:item.article,question:'¿A qué artículo de este apartado corresponde el siguiente fragmento de la guía?',quote:item.quote,options,answer:options.indexOf('Artículo '+item.article),kind:'articulo'});
-    }
-    let wrongSections=shuffle(sections.filter(x=>x.id!==i).map(x=>x.id),item.id+'-n').slice(0,3);
-    let opts=shuffle([i,...wrongSections],item.id+'-s');
-    bank.push({id:'s-'+item.id,section:i,page:item.page,article:item.article,question:'¿En cuál de los nueve apartados normativos de la guía aparece este fragmento?',quote:item.quote,options:opts.map(k=>names[k]),answer:opts.indexOf(i),kind:'apartado'});
-  }
-}
-bank=bank.filter(q=>q.quote.length>=90);
-const balanced=[];let bins=sections.map(s=>shuffle(bank.filter(q=>q.section===s.id),s.name));
-for(let n=0;n<Math.max(...bins.map(x=>x.length));n++)for(let i=0;i<9;i++)if(bins[i][n])balanced.push(bins[i][n]);
-bank=balanced.slice(0,Math.min(235,balanced.length));
-const byId=new Map(bank.map(q=>[q.id,q]));
-function app(html){$('#app').innerHTML=html}
-function nav(v){view=v;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));$('#sectionName').textContent=({inicio:'PANORAMA',estudio:'TEMARIO',practica:'PRÁCTICA',simulacro:'SIMULACRO',errores:'REFUERZO',historial:'HISTORIAL',fuentes:'FUENTE DOCUMENTAL'})[v]||v;$('#sidebar').classList.remove('open');render()}
-function btn(label,fn,cls='primary'){const b=document.createElement('button');b.className=cls;b.textContent=label;b.addEventListener('click',fn);return b}
-function el(tag,cls='',content=''){const e=document.createElement(tag);e.className=cls;e.textContent=content;return e}
-function intro(title,text){return '<div class="hero"><div class="kicker">FUENTE ÚNICA · GUÍA OPLEV · OCTUBRE 2026</div><h1>'+esc(title)+'</h1><p>'+esc(text)+'</p></div>'}
-function dashboard(){
- const h=state.history,answered=h.reduce((a,x)=>a+x.total,0),good=h.reduce((a,x)=>a+x.correct,0),bad=Object.values(state.misses).filter(x=>x>0).length;
- app(
- '<div class="stats-grid"><div class="stat"><strong>'+bank.length+'</strong><span>Reactivos con fragmentos de la guía</span></div><div class="stat"><strong>9</strong><span>Apartados normativos</span></div><div class="stat"><strong>'+h.length+'</strong><span>Intentos terminados</span></div><div class="stat"><strong>'+(answered?Math.round(100*good/answered):0)+'%</strong><span>Acierto acumulado</span></div></div>'+
- '<div class="panel"><h3>Comienza a estudiar</h3><p class="muted">El simulacro contiene 50 preguntas y dura 120 minutos. Al equivocarte recibirás la respuesta y la referencia precisa de página, con la recomendación de volver a leer el fragmento.</p><div class="btnrow" id="actions"></div></div>'+
- '<div class="grid"><div class="panel"><h3>Texto de estudio</h3><p class="muted">Consulta los extractos de la guía, ordenados por norma y página del PDF.</p></div><div class="panel"><h3>Repaso dirigido</h3><p class="muted">'+bad+' preguntas señaladas para reforzar, según tus intentos anteriores.</p></div></div>');
- $('#actions').append(btn('Empezar práctica',()=>nav('practica')),btn('Simulacro de 50 preguntas',()=>nav('simulacro'),'secondary'),btn('Leer temario',()=>nav('estudio'),'secondary'));
-}
-function study(){
- app(intro('Temario y apuntes','Texto extraído del PDF facilitado. Las referencias indican la página física del archivo, que puede diferir de la numeración impresa.')+
- '<div class="panel"><label for="searchtxt" class="label">Buscar dentro de la guía</label><input id="searchtxt" class="input search" placeholder="Ej.: cómputo distrital, casilla, artículo 26"></div><div id="chapters" class="sections"></div>');
- const draw=()=>{let s=$('#searchtxt').value.trim().toLocaleLowerCase('es');let html='';
- for(const ch of sections){let pages=ch.pages.filter(p=>!s||p.t.toLocaleLowerCase('es').includes(s));if(!pages.length)continue;html+='<section class="section"><h3>'+esc(ch.name)+'</h3><p>Páginas '+ch.from+'–'+ch.to+' del PDF · '+pages.length+' página(s)'+(s?' coincidentes':'')+'</p><details><summary>Leer los extractos</summary><div class="reading">'+pages.map(p=>'<p class="label">Página '+p.p+'</p><pre>'+esc(p.t||'Sin texto extraíble en esta página')+'</pre>').join('')+'</div></details></section>'}
- $('#chapters').innerHTML=html||'<div class="empty">No se encontró el término en el texto.</div>'};
- $('#searchtxt').addEventListener('input',draw);draw();
-}
-function start(type){
- const missed=bank.filter(q=>state.misses[q.id]>0);
- const pool=type==='refuerzo'?(missed.length?missed:bank):bank;
- const count=type==='simulacro'?50:type==='refuerzo'?Math.min(20,pool.length):20;
- const ids=shuffle(pool.map(q=>q.id),Date.now().toString()).slice(0,count);
- if(!ids.length){app(intro('Sin preguntas pendientes','No hay preguntas falladas registradas. Comienza una práctica.'));return}
- session={type,ids,index:0,answers:{},start:Date.now(),deadline:type==='simulacro'?Date.now()+120*60*1000:null,finished:false};
- displayQuestion();clearInterval(timer);
- if(session.deadline)timer=setInterval(()=>{if(session&&!session.finished){if(Date.now()>=session.deadline)finish();else{let t=$('#clock');if(t)t.textContent=clock()}}},1000);
-}
-const clock=()=>{let d=Math.max(0,Math.floor((session.deadline-Date.now())/1000));return String(Math.floor(d/60)).padStart(2,'0')+':'+String(d%60).padStart(2,'0')};
-function displayQuestion(){
- if(!session)return;let {ids,index,answers,type}=session;
- if(index>=ids.length){finish();return}
- const q=byId.get(ids[index]);if(!q){finish();return}
- const picked=answers[q.id],answered=picked!==undefined;
- app('<div class="flex"><span class="pill">'+esc(type==='simulacro'?'SIMULACRO':type==='refuerzo'?'REFUERZO':'PRÁCTICA')+'</span><span class="pill">Pregunta '+(index+1)+' de '+ids.length+'</span>'+(session.deadline?'<span class="pill" id="clock">'+clock()+'</span>':'')+'</div>'+
- '<div class="meter"><div style="width:'+Math.round(index/ids.length*100)+'%"></div></div><div class="panel"><div class="kicker">'+esc(names[q.section])+'</div><div class="question">'+esc(q.question)+'</div><div class="notice">'+esc('“'+q.quote+'”')+'</div><div class="options" id="choices" style="margin-top:18px"></div><div id="feedback"></div><div class="btnrow" id="questionActions"></div></div>');
- q.options.forEach((o,i)=>{const b=btn(String.fromCharCode(65+i)+'. '+o,()=>{if(session.answers[q.id]!==undefined)return;session.answers[q.id]=i;displayQuestion()},'option'+(answered&&i===q.answer?' correct':'')+(answered&&i===picked&&i!==q.answer?' wrong':''));b.disabled=answered;$('#choices').append(b)});
- if(answered){
-  const correct=picked===q.answer;
-  $('#feedback').innerHTML='<div class="notice"><strong>'+(correct?'Respuesta correcta.':'Respuesta incorrecta.')+'</strong><p>Opción correcta: <b>'+esc(q.options[q.answer])+'</b></p><p><b>Qué reforzar:</b> vuelve a leer el apartado «'+esc(names[q.section])+'»'+(q.article?', artículo '+esc(q.article):'')+', página '+q.page+' del PDF.</p><p>La respuesta se contrasta con el fragmento literal mostrado. No se utilizaron fuentes distintas a la guía.</p></div>';
-  $('#questionActions').append(btn(index===ids.length-1?'Finalizar intento':'Siguiente pregunta',()=>{session.index++;displayQuestion()}));
- }else{
-  $('#questionActions').append(btn('Terminar intento',finish,'secondary'));
- }
-}
-function finish(){
- if(!session||session.finished)return;
- session.finished=true;clearInterval(timer);
- const correct=session.ids.filter(id=>session.answers[id]===byId.get(id)?.answer).length;
- const incorrect=session.ids.filter(id=>session.answers[id]!==undefined&&session.answers[id]!==byId.get(id)?.answer).length;
- const omitted=session.ids.length-correct-incorrect;
- for(const id of session.ids){if(session.answers[id]!==undefined){if(session.answers[id]!==byId.get(id).answer)state.misses[id]=(state.misses[id]||0)+1;else state.misses[id]=0}}
- const record={when:new Date().toISOString(),type:session.type,total:session.ids.length,correct,incorrect,omitted,questions:session.ids,answers:session.answers,duration:Math.round((Date.now()-session.start)/1000)};
- state.history.unshift(record);store();session=null;
- app(intro('Intento finalizado','Tus resultados quedan guardados en este navegador. Puedes repetir la práctica, revisar los fallos o exportar tu progreso.')+
- '<div class="stats-grid"><div class="stat"><strong>'+correct+'</strong><span>Correctas</span></div><div class="stat"><strong>'+incorrect+'</strong><span>Incorrectas</span></div><div class="stat"><strong>'+omitted+'</strong><span>Sin contestar</span></div><div class="stat"><strong>'+Math.round(100*correct/record.total)+'%</strong><span>Calificación del intento</span></div></div><div class="panel"><h3>Qué reforzar</h3><div id="wrongList"></div><div class="btnrow" id="lastActions"></div></div>');
- const missed=record.questions.filter(id=>record.answers[id]!==byId.get(id)?.answer);
- $('#wrongList').innerHTML=missed.length?missed.map(id=>{let q=byId.get(id);return '<p class="muted">• '+esc(names[q.section])+' · '+(q.article?'Artículo '+esc(q.article)+' · ':'')+'Página '+q.page+' del PDF</p>'}).join(''):'<p class="muted">No hubo errores ni preguntas omitidas.</p>';
- $('#lastActions').append(btn('Repasar falladas',()=>nav('errores')),btn('Historial',()=>nav('historial'),'secondary'),btn('Volver a practicar',()=>start('practica'),'secondary'));
-}
-function setup(type){
- if(session&&!session.finished){displayQuestion();return}
- const t=type==='simulacro'?'Simulacro cronometrado':type==='refuerzo'?'Mis puntos débiles':'Practicar preguntas';
- const desc=type==='simulacro'?'50 reactivos, 4 opciones y un máximo de 120 minutos, como establece la guía.':type==='refuerzo'?'Se seleccionan los reactivos respondidos incorrectamente en intentos anteriores.':'20 preguntas seleccionadas del banco de ejercicios fundamentados en la guía.';
- app(intro(t,desc)+'<div class="panel"><h3>Antes de comenzar</h3><p class="muted">Las preguntas son didácticas y no oficiales. Todas se basan en fragmentos del texto aportado; la explicación remite a la página y artículo pertinentes.</p><div class="btnrow" id="startActions"></div></div>');
- $('#startActions').append(btn('Comenzar intento',()=>start(type)));
-}
-function history(){
- app(intro('Historial de intentos','Cada intento se registra separadamente, incluso si terminaste sin responder todas las preguntas.')+(state.history.length?'<div class="panel"><table class="table"><thead><tr><th>Fecha</th><th>Modalidad</th><th>Aciertos</th><th>Errores</th><th>Omisiones</th><th>Porcentaje</th></tr></thead><tbody>'+state.history.map(x=>'<tr><td>'+new Date(x.when).toLocaleString('es-MX')+'</td><td>'+esc(x.type)+'</td><td>'+x.correct+'</td><td>'+x.incorrect+'</td><td>'+x.omitted+'</td><td>'+Math.round(100*x.correct/x.total)+'%</td></tr>').join('')+'</tbody></table></div>':'<div class="panel empty">Aún no tienes intentos registrados.</div>')+'');
-
-}
-function sources(){
- app(intro('Fuente documental','Fuente exclusiva de contenidos: Guía de Estudios para aspirantes a Consejos Distritales, Universidad Veracruzana / CEOA, octubre de 2026.')+'<div class="panel"><h3>Documento y trazabilidad</h3><p class="muted">El repositorio incluye el texto extraído de las 127 páginas del PDF original, organizado por número de página en guia.js. Las portadas y páginas sin texto extraíble no reproducen sus imágenes.</p><p>Las preguntas didácticas se generan únicamente a partir de ese texto. Cada respuesta remite al apartado, artículo —cuando procede— y página del PDF. No son reactivos oficiales ni sustituyen la lectura del documento.</p><div class="btnrow" id="sourceActions"></div><p class="smallnote">Los resultados se guardan únicamente en el almacenamiento local de este navegador, no se sincronizan entre dispositivos.</p></div>');
- $('#sourceActions').append(btn('Leer texto de la guía',()=>nav('estudio')));
-
-}
-function render(){if(view==='inicio')dashboard();else if(view==='estudio')study();else if(view==='practica')setup('practica');else if(view==='simulacro')setup('simulacro');else if(view==='errores')setup('refuerzo');else if(view==='historial')history();else sources()}
-document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>nav(b.dataset.view)));
-$('#mobileMenu').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
-render();
+const enc=s=>encodeURIComponent(s);
+const $=s=>document.querySelector(s);
+const find=q=>INDEX.get(q);
+const clone=o=>JSON.parse(JSON.stringify(o));
+const randId=()=>crypto?.randomUUID?.()||('ople-'+Date.now()+'-'+Math.random().toString(36).slice(2));
+const fresh=()=>({history:[],active:null,seen:[],modified:Date.now()});
+const key=u=>APP_VERSION+':'+u;
+function localRead(u){try{const d=JSON.parse(localStorage.getItem(key(u))||'null');return normalize(d)}catch{return fresh()}}
+function normalize(d){const x=d&&typeof d==='object'?d:fresh();return{history:Array.isArray(x.history)?x.history.filter(h=>h?.id&&Array.isArray(h.questions)):[],active:x.active&&Array.isArray(x.active.questions)?x.active:null,seen:Array.isArray(x.seen)?x.seen:[],modified:Number(x.modified)||Date.now()}}
+function mergeStates(a,b){let results=new Map();for(const h of [...(a.history||[]),...(b.history||[])]){if(h?.id)results.set(h.id,h)}let active=(!a.active?b.active:!b.active?a.active:(a.active.updated||0)>=(b.active.updated||0)?a.active:b.active);return{history:[...results.values()].sort((x,y)=>(y.ended||0)-(x.ended||0)),active,seen:[...new Set([...(a.seen||[]),...(b.seen||[])])],modified:Math.max(a.modified||0,b.modified||0)}}
+function persist(remote=true){if(!user||!state)return;state.modified=Date.now();localStorage.setItem(key(user),JSON.stringify(state));if(remote)scheduleSync()}
+function syncLabel(){let el=$('#syncStatus');if(el){el.textContent=status;el.className='sync-status '+(status==='Sincronizado'?'ok':status==='Solo en este dispositivo'?'warn':'')}}
+const endpoint=()=>server.url.replace(/\/$/,'')+'/rest/v1/ople_learning_state';
+const apiHeaders=()=>({'apikey':server.publishableKey,'Content-Type':'application/json'});
+async function fetchCloud(){const response=await fetch(endpoint()+'?username=eq.'+enc(user)+'&select=payload&limit=1',{headers:apiHeaders(),cache:'no-store'});if(!response.ok)throw Error('Lectura '+response.status);const rows=await response.json();return normalize(rows[0]?.payload)}
+async function writeCloud(record){const response=await fetch(endpoint()+'?on_conflict=username',{method:'POST',headers:{...apiHeaders(),'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({username:user,payload:record})});if(!response.ok)throw Error('Escritura '+response.status+' '+(await response.text()).slice(0,130))}
+async function synchronize(){if(!CLOUD||!state||!user||cloudLock)return;cloudLock=true;status='Sincronizando…';syncLabel();try{const fromServer=await fetchCloud();state=mergeStates(state,fromServer);localStorage.setItem(key(user),JSON.stringify(state));await writeCloud(state);status='Sincronizado';syncLabel()}catch(e){status='Sin conexión: datos locales';syncLabel();console.warn('Aula Electoral: no se pudo sincronizar',e.message)}finally{cloudLock=false}}
+function scheduleSync(){if(!CLOUD)return;clearTimeout(syncTimer);syncTimer=setTimeout(synchronize,550)}
+function signIn(candidate){const name=candidate.trim();if(!USERS.includes(name))return false;user=name;sessionStorage.setItem(activeStorage,user);state=localRead(user);page='inicio';status=CLOUD?'Conectando…':'Solo en este dispositivo';layout();if(CLOUD){synchronize().then(()=>{if(page==='inicio')render()})}clearInterval(timer);timer=setInterval(tick,1000);return true}
+function signOut(){clearInterval(timer);clearTimeout(syncTimer);user=null;state=null;sessionStorage.removeItem(activeStorage);login()}
+function login(){root.innerHTML=`<div class="login-screen"><div class="login-panel"><div class="login-top"><div class="brand-mark">✳</div><div><div class="brand-label">AULA ELECTORAL</div><span class="brand-sub">VERACRUZ · 2026</span></div></div><div class="eyebrow">Acceso a plataforma</div><h1>¿Quién ingresa?</h1><p>Escribe tu nombre de usuario para abrir tu espacio personal de estudio.</p><form id="loginForm"><label class="field-label" for="loginName">Nombre de usuario</label><input id="loginName" class="field" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" maxlength="40"><div class="error" id="loginError" role="alert"></div><button class="btn primary" type="submit">Ingresar</button></form><p class="login-note">Cada usuario conserva sus propios resultados. El acceso solo con nombre distingue perfiles, pero no protege la cuenta frente a quien conozca ese nombre.</p></div></div>`;
+$('#loginForm').addEventListener('submit',e=>{e.preventDefault();if(!signIn($('#loginName').value))$('#loginError').textContent='Usuario no reconocido. Comprueba cómo está escrito.'});$('#loginName').focus()}
+function layout(){root.innerHTML=`<div class="overlay" id="overlay"></div><div class="app"><aside class="sidebar" id="sidebar"><div class="brand"><div class="brand-mark">✳</div><div><div class="brand-label">AULA ELECTORAL</div><span class="brand-sub">VERACRUZ · 2026</span></div></div><div class="side-label">TU ESPACIO DE ESTUDIO</div><nav class="nav" id="nav"><button data-view="inicio"><span class="nicon">⌂</span>Panorama</button><button data-view="estudio"><span class="nicon">▤</span>Temario y apuntes</button><button data-view="practica"><span class="nicon">◎</span>Practicar preguntas</button><button data-view="simulacro"><span class="nicon">◷</span>Simulacro de examen</button><button data-view="refuerzo"><span class="nicon">↻</span>Mis puntos débiles</button><button data-view="historial"><span class="nicon">▥</span>Historial de intentos</button><button data-view="fuentes"><span class="nicon">ⓘ</span>Fuente documental</button></nav><div class="side-bottom"><strong>Examen oficial</strong><p>Sábado 21 de noviembre de 2026</p><p>50 preguntas · 120 minutos</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><button class="hamburger" aria-label="Abrir menú" id="hamburger">☰</button><span class="crumb">AULA ELECTORAL / <span id="location">PANORAMA</span></span></div><div class="top-right"><span class="sync-status" id="syncStatus"></span><span class="avatar" aria-hidden="true">${esc(user.slice(0,1))}</span><span class="user-label">${esc(user)}</span><button class="btn ghost" id="logout" style="min-height:35px;padding:6px 10px;font-size:11px">Salir</button></div></header><main class="main" id="main"></main><footer>Material de estudio: exclusivamente la Guía de Estudios OPLEV 2026-2027 suministrada. Preguntas didácticas, no oficiales.</footer></div></div>`;
+$('#hamburger').onclick=()=>toggleMenu(true);$('#overlay').onclick=()=>toggleMenu(false);$('#logout').onclick=()=>{if(state?.active&&!confirm('Tu intento actual quedará guardado. ¿Cerrar sesión?'))return;signOut()};$$('#nav button').forEach(b=>b.onclick=()=>navigate(b.dataset.view));render()}
+function toggleMenu(open){$('#sidebar')?.classList.toggle('open',open);$('#overlay')?.classList.toggle('open',open);document.body.style.overflow=open?'hidden':''}
+function $$(selector){return [...document.querySelectorAll(selector)]}
+function navigate(v){page=v;toggleMenu(false);render();window.scrollTo(0,0)}
+function heading(title,description,flag='ESTUDIA CON LA GUÍA OFICIAL'){return `<section class="page-head"><div class="eyebrow">${esc(flag)}</div><h1>${esc(title)}</h1><p>${esc(description)}</p></section>`}
+function button(label,callback,cls='primary',container){const b=document.createElement('button');b.type='button';b.className='btn '+cls;b.textContent=label;b.onclick=callback;container.append(b);return b}
+function setView(html){$('#main').innerHTML=html;syncLabel()}
+function chapterCounts(){return MODS.map(m=>({...m,questions:Q.filter(q=>q.topic===m.id).length}))}
+function weakQuestions(){const latest=new Map();let chronological=[...state.history].sort((a,b)=>(a.ended||0)-(b.ended||0));for(const h of chronological){for(const id of h.questions||[]){let value=h.answers?.[id];if(value!==undefined)latest.set(id,value!==0)}}return [...latest.entries()].filter(([,x])=>x).map(([id])=>find(id)).filter(Boolean)}
+function dashboard(){let history=state.history;let correct=history.reduce((n,x)=>n+(x.correct||0),0);let total=history.reduce((n,x)=>n+(x.questions?.length||0),0);let weak=weakQuestions().length;setView(heading('Panel de estudio','Tu preparación, tus resultados y los nueve apartados de la guía del OPLEV.','ESPACIO DE '+user.toUpperCase())+`<section class="kpis"><div class="kpi"><strong>${Q.length}</strong><span>Reactivos verificados</span></div><div class="kpi"><strong>${state.seen.length}/9</strong><span>Apartados estudiados</span></div><div class="kpi"><strong>${history.length}</strong><span>Intentos terminados</span></div><div class="kpi"><strong>${total?Math.round(correct/total*100):0}%</strong><span>Acierto acumulado</span></div></section><section class="two-col"><div class="panel"><h2>Comienza a practicar</h2><p class="muted">Preguntas de conocimiento jurídico, identificación de artículos y aplicación de situaciones. Cada respuesta tiene fundamento.</p><div class="actions" id="dashboardActions"></div></div><div class="panel"><h2>Tu refuerzo</h2><p class="muted">${weak?`Tienes ${weak} reactivo${weak===1?'':'s'} con una respuesta incorrecta pendiente de reforzar.`:'Todavía no tienes preguntas pendientes de reforzar.'}</p><div class="actions" id="weakActions"></div></div></section>${state.active?'<div class="panel"><h2>Intento sin terminar</h2><p class="muted">Puedes continuar exactamente donde te quedaste, incluso después de actualizar la página.</p><div class="actions" id="resumeActions"></div></div>':''}<div class="panel"><h2>Cobertura por ordenamiento</h2><div class="module-list">${chapterCounts().map(m=>`<div class="list-head"><span>${esc(m.title)}</span><span class="tag">${m.questions} reactivos</span></div>`).join('<div class="separator"></div>')}</div></div>`);
+const d=$('#dashboardActions');button('Practicar preguntas',()=>navigate('practica'),'primary',d);button('Simulacro de 50 preguntas',()=>navigate('simulacro'),'ghost',d);const w=$('#weakActions');button('Repasar errores',()=>navigate('refuerzo'),weak?'primary':'ghost',w);if(state.active)button('Continuar intento',()=>showQuestion(), 'primary',$('#resumeActions'))}
+function library(){setView(heading('Temario y apuntes','Los textos pertenecen exclusivamente a los nueve apartados seleccionados en la guía. Busca palabras o abre un ordenamiento para consultar sus páginas.')+`<section class="panel"><div class="search-row"><label><span class="field-label">Buscar en el texto de la guía</span><input class="field" id="searchText" placeholder="Ej.: sesión, cómputo, delito electoral" value="${esc(searchText)}"></label></div><div class="legend">Cada página tiene su referencia al documento original. Puedes marcar los apartados que hayas estudiado.</div><div class="module-list" id="moduleList"></div></section>`);$('#searchText').oninput=e=>{searchText=e.target.value;drawModules()};drawModules()}
+function drawModules(){const s=searchText.trim().toLocaleLowerCase('es');let html='';for(const m of MODS){const pages=PAGES.filter(x=>x.p>=m.from&&x.p<=m.to&&(x.t||'').toLocaleLowerCase('es').includes(s));if(s&&pages.length===0&&!m.title.toLocaleLowerCase('es').includes(s))continue;const chosen=s?pages:PAGES.filter(x=>x.p>=m.from&&x.p<=m.to);let done=state.seen.includes(m.id);html+=`<article class="module"><div class="module-title"><div><h3>${esc(m.title)}</h3><p>Guía, páginas PDF ${m.from}–${m.to} · ${Q.filter(x=>x.topic===m.id).length} reactivos</p></div><span class="tag ${done?'green':''}">${done?'Estudiado':'Pendiente'}</span></div><div class="actions"><button type="button" class="btn ghost" data-read="${m.id}">Consultar extractos</button><button type="button" class="btn ${done?'ghost':'primary'}" data-seen="${m.id}">${done?'Marcar pendiente':'Marcar estudiado'}</button></div><div class="module-body" hidden data-body="${m.id}">${chosen.map(p=>`<div class="source-page">Página ${p.p} del PDF</div><div class="source-text">${esc(p.t||'Sin texto extraído en esta página.')}</div>`).join('')}</div></article>`}
+$('#moduleList').innerHTML=html||'<p class="empty">No hay coincidencias con ese término.</p>';
+$$('[data-read]').forEach(b=>b.onclick=()=>{const e=$('[data-body="'+b.dataset.read+'"]');e.hidden=!e.hidden;b.textContent=e.hidden?'Consultar extractos':'Ocultar extractos'});
+$$('[data-seen]').forEach(b=>b.onclick=()=>{let m=b.dataset.seen;state.seen=state.seen.includes(m)?state.seen.filter(x=>x!==m):[...state.seen,m];persist();drawModules()})}
+function setup(type){if(state.active){setView(heading('Hay un intento en curso','Puedes continuarlo o terminarlo antes de comenzar uno nuevo.')+`<section class="panel"><div class="actions" id="existActions"></div></section>`);let c=$('#existActions');button('Continuar intento',showQuestion,'primary',c);button('Abandonar y registrar intento',()=>{if(confirm('¿Finalizar el intento actual? Se registrarán las preguntas sin contestar.'))finish()},'danger',c);return}
+let sim=type==='simulacro';setView(heading(sim?'Simulacro de examen':'Practicar preguntas',sim?'50 preguntas, cuatro opciones y 120 minutos. Las respuestas se corrigen al finalizar.':'Elige un tema, la cantidad de preguntas y el tipo de reactivo. Las respuestas se explicarán después de contestar.')+`<section class="panel"><h2>Configurar intento</h2>${sim?'<p class="muted">El simulacro reúne preguntas de los nueve ordenamientos, con un tiempo máximo de dos horas.</p>':`<div class="grid-options"><label><span class="field-label">Tema</span><select id="topic" class="field"><option value="all">Todos los temas</option>${MODS.map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('')}</select></label><label><span class="field-label">Número de preguntas</span><select id="quantity" class="field"><option value="10">10 preguntas</option><option value="20" selected>20 preguntas</option><option value="30">30 preguntas</option><option value="50">50 preguntas</option></select></label><label><span class="field-label">Modalidad de preguntas</span><select id="kind" class="field"><option value="all">Mixtas</option><option value="conocimiento">Conocimiento normativo</option><option value="identificacion_articulo">Identificación de artículos</option><option value="caso_practico">Casos prácticos</option></select></label></div>`}<div class="actions" id="launch"></div></section>`);
+const c=$('#launch');button(sim?'Iniciar simulacro':'Iniciar práctica',()=>{const topic=sim?'all':$('#topic').value;const count=sim?50:Number($('#quantity').value);const kind=sim?'all':$('#kind').value;start(type,topic,kind,count)},'primary',c)}
+function sample(pool,n,seed){let a=pool.map(q=>({q,score:hash(seed+'|'+q.id)})).sort((a,b)=>a.score-b.score).map(x=>x.q);return a.slice(0,n)}
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function balancedExam(seed){const chunks=MODS.map(m=>sample(Q.filter(q=>q.topic===m.id),8,seed+m.id));const order=[];for(let i=0;i<8;i++)for(const group of chunks)if(group[i])order.push(group[i]);let result=sample(order,50,seed+'-final');return result}
+function start(type,topic,kind,count){let candidates=type==='refuerzo'?weakQuestions():Q.filter(q=>(topic==='all'||q.topic===topic)&&(kind==='all'||q.kind===kind));if(!candidates.length){alert('No hay preguntas disponibles para esa selección.');return}const id=randId();let chosen=type==='simulacro'?balancedExam(id):sample(candidates,Math.min(count,candidates.length),id);const now=Date.now();state.active={id,type,questions:chosen.map(q=>q.id),answers:{},index:0,started:now,deadline:type==='simulacro'?now+120*60000:null,updated:now};persist();showQuestion()}
+function orderFor(q,s){const arr=[0,1,2,3];return arr.map(i=>({i,score:hash(s.id+'|'+q.id+'|'+i)})).sort((a,b)=>a.score-b.score).map(x=>x.i)}
+function currentQuestion(){const s=state.active;return s?find(s.questions[s.index]):null}
+function tick(){if(!state?.active)return;const s=state.active;if(s.deadline&&Date.now()>=s.deadline){finish(true);return}const clk=$('#timeLeft');if(clk&&s.deadline)clk.textContent=clock(s.deadline)}
+function clock(deadline){let secs=Math.max(0,Math.ceil((deadline-Date.now())/1000));return Math.floor(secs/60).toString().padStart(2,'0')+':'+(secs%60).toString().padStart(2,'0')}
+function showQuestion(){const s=state.active;if(!s){navigate('inicio');return}if(s.deadline&&Date.now()>s.deadline){finish(true);return}let q=currentQuestion();if(!q){finish();return}page=s.type==='simulacro'?'simulacro':s.type==='refuerzo'?'refuerzo':'practica';let selected=s.answers[q.id],answered=selected!==undefined,exam=s.type==='simulacro',reveal=answered&&!exam;const options=orderFor(q,s);const title=s.type==='simulacro'?'SIMULACRO':s.type==='refuerzo'?'REPASO DE ERRORES':'PRÁCTICA';setView(`<div class="quiz-bar"><span class="tag">${title} · PREGUNTA ${s.index+1} / ${s.questions.length}</span>${s.deadline?`<span class="tag timer" id="timeLeft">${clock(s.deadline)}</span>`:''}</div><div class="progress-outer"><div class="progress-inner" style="width:${(s.index/s.questions.length)*100}%"></div></div><section class="panel question-card"><div class="head-meta"><span class="eyebrow">${esc(({conocimiento:'Conocimiento jurídico',identificacion_articulo:'Identificación de artículos',caso_practico:'Aplicación práctica'})[q.kind])}</span><span class="subtle small">${exam?'Corrección al terminar':'Corrección inmediata'}</span></div><h2 class="question-title">${esc(q.question)}</h2><div class="option-list" id="options"></div>${reveal?feedback(q,selected):''}<div class="actions" id="questionActions"></div></section>`);
+const target=$('#options');for(let i=0;i<options.length;i++){let real=options[i],b=document.createElement('button');b.type='button';b.className='option'+(reveal&&real===0?' correct':'')+(reveal&&real===selected&&real!==0?' wrong':'')+(selected===real&&exam?' focus':'');b.innerHTML=`<span class="option-letter">${String.fromCharCode(65+i)}.</span><span>${esc(q.options[real])}</span>`;b.disabled=reveal;b.onclick=()=>{s.answers[q.id]=real;s.updated=Date.now();persist();showQuestion()};target.append(b)}
+const actions=$('#questionActions');if(s.index>0)button('Anterior',()=>{s.index--;s.updated=Date.now();persist();showQuestion()},'ghost',actions);
+if(exam){if(s.index<s.questions.length-1)button('Siguiente',()=>{s.index++;s.updated=Date.now();persist();showQuestion()},'primary',actions);else button('Finalizar simulacro',()=>{if(confirm('¿Entregar el simulacro? Las preguntas sin respuesta se contabilizarán como omisiones.'))finish()},'primary',actions)}
+else if(reveal){button(s.index===s.questions.length-1?'Finalizar intento':'Siguiente pregunta',()=>{s.index++;s.updated=Date.now();persist();if(s.index===s.questions.length)finish();else showQuestion()},'primary',actions)}
+else{button('Finalizar intento',()=>{if(confirm('¿Finalizar ahora? Las preguntas no contestadas se registrarán como omisiones.'))finish()},'ghost',actions)}
+if(exam)button('Entregar ahora',()=>{if(confirm('¿Finalizar el simulacro y registrar tu calificación?'))finish()},'ghost',actions)}
+function feedback(q,selected){return `<div class="feedback ${selected===0?'good':'bad'}"><h3>${selected===0?'✓ Respuesta correcta':'✕ Respuesta incorrecta'}</h3><p><strong>Respuesta:</strong> ${esc(q.answer)}</p><p><strong>Fundamento:</strong> ${esc(MODS.find(m=>m.id===q.topic).title)}${q.article?', artículo '+esc(q.article):''}. Página ${q.page} del PDF.</p><p><strong>Texto que lo respalda:</strong> <span class="quote">«${esc(q.evidence)}»</span></p><p>Para reforzar, revisa el artículo y compara su disposición con las demás alternativas. <a href="Guia_estudio_2026.pdf#page=${q.page}" target="_blank" rel="noopener">Ver página del PDF</a>.</p></div>`}
+function finish(timedOut=false){const s=state.active;if(!s)return;const now=Date.now();let correct=0,incorrect=0,omitted=0;for(const id of s.questions){const a=s.answers[id];if(a===undefined)omitted++;else if(a===0)correct++;else incorrect++}let record={...clone(s),correct,incorrect,omitted,ended:now,timedOut:!!timedOut};state.history=[record,...state.history.filter(h=>h.id!==record.id)];state.active=null;persist();clearInterval(timer);page='resultados';results(record)}
+function results(h){setView(heading('Resultados del intento',h.timedOut?'El tiempo del simulacro terminó; el sistema registró las respuestas enviadas.':'Se registraron tus respuestas, errores y preguntas omitidas.')+`<div class="kpis"><div class="kpi"><strong>${h.correct}</strong><span>Correctas</span></div><div class="kpi"><strong>${h.incorrect}</strong><span>Incorrectas</span></div><div class="kpi"><strong>${h.omitted}</strong><span>Omitidas</span></div><div class="kpi"><strong>${Math.round(100*h.correct/h.questions.length)}%</strong><span>Calificación</span></div></div><section class="panel"><h2>Revisión de respuestas</h2><p class="muted">Las respuestas incorrectas y las omitidas aparecen primero, acompañadas del fundamento normativo y la página de la guía.</p><div id="resultList"></div><div class="actions" id="resultActions"></div></section>`);
+const ids=[...h.questions].sort((a,b)=>{const va=h.answers[a],vb=h.answers[b];return (va===0?1:0)-(vb===0?1:0)});const items=$('#resultList');for(const id of ids){const q=find(id);if(!q)continue;const selected=h.answers[id];const p=document.createElement('div');p.className='review-item';p.innerHTML=`<div class="pillbar"><span class="tag ${selected===0?'green':''}">${selected===undefined?'Omitida':selected===0?'Correcta':'Incorrecta'}</span><span class="subtle small">${esc(MODS.find(m=>m.id===q.topic).title)}</span></div><p class="question">${esc(q.question)}</p><details><summary>Ver explicación y fundamento</summary>${feedback(q,selected)}</details>`;items.append(p)}const a=$('#resultActions');button('Repasar puntos débiles',()=>navigate('refuerzo'),'primary',a);button('Ver historial',()=>navigate('historial'),'ghost',a)}
+function review(){const qs=weakQuestions();setView(heading('Mis puntos débiles','Repasa los reactivos cuya respuesta más reciente fue incorrecta. Al responder correctamente, saldrán de esta lista.')+`<div class="panel"><h2>${qs.length} preguntas pendientes</h2><p class="muted">Los reactivos se recuperan de tus propios intentos, sin afectar el historial de otras personas.</p><div class="actions" id="reviewActions"></div>${qs.slice(0,20).map(q=>`<div class="review-item"><div class="tag">Página PDF ${q.page} · ${esc(MODS.find(m=>m.id===q.topic).title)}</div><p class="question">${esc(q.question)}</p><details><summary>Consultar fundamento</summary><p>${esc(q.evidence)}</p><p>Artículo ${esc(q.article||'no especificado en el reactivo')} · <a href="Guia_estudio_2026.pdf#page=${q.page}" target="_blank" rel="noopener">Ver PDF</a></p></details></div>`).join('')}</div>`);button('Practicar mis errores',()=>start('refuerzo','all','all',Math.min(20,qs.length)),'primary',$('#reviewActions')).disabled=!qs.length}
+function history(){const h=state.history;setView(heading('Historial de intentos','Cada intento se contabiliza individualmente. Solo aparecen los resultados de tu usuario.')+(h.length?`<section class="panel"><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Modalidad</th><th>Aciertos</th><th>Errores</th><th>Omisiones</th><th>Calificación</th><th></th></tr></thead><tbody>${h.map(x=>`<tr><td>${new Date(x.ended).toLocaleString('es-MX')}</td><td>${esc(x.type)}</td><td>${x.correct}</td><td>${x.incorrect}</td><td>${x.omitted}</td><td>${Math.round(x.correct/x.questions.length*100)}%</td><td><button class="btn ghost" data-result="${esc(x.id)}">Detalles</button></td></tr>`).join('')}</tbody></table></div></section>`:'<section class="panel empty">Todavía no hay intentos terminados.</section>'));$$('[data-result]').forEach(b=>b.onclick=()=>{const a=state.history.find(x=>x.id===b.dataset.result);if(a){page='resultados';results(a)}})}
+function sources(){setView(heading('Fuente documental','Toda la información normativa utilizada procede del PDF de la guía de estudios del OPLEV 2026-2027, proporcionado por el usuario.')+`<div class="panel"><h2>Guía de Estudios 2026–2027</h2><p>Universidad Veracruzana · Centro de Estudios de Opinión y Análisis · Octubre de 2026.</p><p class="muted">El banco contiene ${Q.length} preguntas propias con cuatro opciones, fundamentadas en artículos y páginas verificables. No constituye un examen oficial. El texto de la guía es la única fuente académica utilizada.</p><div class="actions"><a class="btn primary" href="Guia_estudio_2026.pdf" target="_blank" rel="noopener">Abrir PDF original</a><button class="btn ghost" id="goStudy">Consultar temario en la página</button></div></div><div class="panel"><h2>Perfiles y sincronización</h2><p>Los perfiles Rosario y LuisOrta mantienen resultados independientes.</p>${CLOUD?'<p class="muted">La base de datos está configurada. La parte superior indica el resultado de la última sincronización.</p>':'<div class="notice">La sincronización remota todavía no está activada. El progreso queda guardado por usuario en el navegador actual; para verlo desde otro dispositivo hace falta completar la conexión con la base de datos. No se presenta como una sincronización funcional hasta entonces.</div>'}<p class="small muted">El acceso por nombre de usuario, sin una contraseña, no impide que otra persona que conozca ese nombre pueda acceder a ese perfil.</p></div>`);$('#goStudy').onclick=()=>navigate('estudio')}
+function render(){if(!user){login();return}const loc={inicio:'PANORAMA',estudio:'TEMARIO',practica:'PRÁCTICA',simulacro:'SIMULACRO',refuerzo:'REFUERZO',historial:'HISTORIAL',fuentes:'FUENTE DOCUMENTAL',resultados:'RESULTADOS'};$('#location').textContent=loc[page]||'ESTUDIO';$$('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===page));if(state.active&&(page==='practica'||page==='simulacro'||page==='refuerzo')){showQuestion();return}if(page==='inicio')dashboard();else if(page==='estudio')library();else if(page==='practica')setup('practica');else if(page==='simulacro')setup('simulacro');else if(page==='refuerzo')review();else if(page==='historial')history();else if(page==='fuentes')sources();else dashboard()}
+if(user)signIn(user);else login();
 })();
