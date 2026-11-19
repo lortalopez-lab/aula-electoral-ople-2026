@@ -9,7 +9,7 @@ const APP_VERSION='ople2026-v2';
 const activeStorage='ople-active-tab-v2';
 const server=window.OPLE_SYNC_CONFIG||{};
 const CLOUD=Boolean(/^https:\/\/[a-z\d.-]+\.supabase\.co\/?$/i.test((server.url||'').replace(/\/$/,''))&&server.publishableKey?.startsWith('sb_publishable_'));
-let user=sessionStorage.getItem(activeStorage),state=null,page='inicio',timer=null,syncTimer=null,cloudLock=false,status=CLOUD?'Conectando…':'Solo en este dispositivo';
+let user=sessionStorage.getItem(activeStorage),state=null,page='inicio',timer=null,syncTimer=null,cloudLock=false,syncPending=false,status=CLOUD?'Conectando…':'Solo en este dispositivo';
 let filterTopic='all',filterSize=20,filterType='all',searchText='';
 if(!USERS.includes(user))user=null;
 const root=document.getElementById('root');
@@ -23,14 +23,38 @@ const fresh=()=>({history:[],active:null,seen:[],modified:Date.now()});
 const key=u=>APP_VERSION+':'+u;
 function localRead(u){try{const d=JSON.parse(localStorage.getItem(key(u))||'null');return normalize(d)}catch{return fresh()}}
 function normalize(d){const x=d&&typeof d==='object'?d:fresh();return{history:Array.isArray(x.history)?x.history.filter(h=>h?.id&&Array.isArray(h.questions)):[],active:x.active&&Array.isArray(x.active.questions)?x.active:null,seen:Array.isArray(x.seen)?x.seen:[],modified:Number(x.modified)||Date.now()}}
-function mergeStates(a,b){let results=new Map();for(const h of [...(a.history||[]),...(b.history||[])]){if(h?.id)results.set(h.id,h)}let active=(!a.active?b.active:!b.active?a.active:(a.active.updated||0)>=(b.active.updated||0)?a.active:b.active);return{history:[...results.values()].sort((x,y)=>(y.ended||0)-(x.ended||0)),active,seen:[...new Set([...(a.seen||[]),...(b.seen||[])])],modified:Math.max(a.modified||0,b.modified||0)}}
+function mergeStates(a,b){let results=new Map();for(const h of [...(a.history||[]),...(b.history||[])]){if(h?.id)results.set(h.id,h)}let active=(!a.active?b.active:!b.active?a.active:(a.active.updated||0)>=(b.active.updated||0)?a.active:b.active);if(active&&results.has(active.id))active=null;return{history:[...results.values()].sort((x,y)=>(y.ended||0)-(x.ended||0)),active,seen:[...new Set([...(a.seen||[]),...(b.seen||[])])],modified:Math.max(a.modified||0,b.modified||0)}}
 function persist(remote=true){if(!user||!state)return;state.modified=Date.now();localStorage.setItem(key(user),JSON.stringify(state));if(remote)scheduleSync()}
 function syncLabel(){let el=$('#syncStatus');if(el){el.textContent=status;el.className='sync-status '+(status==='Sincronizado'?'ok':status==='Solo en este dispositivo'?'warn':'')}}
 const endpoint=()=>server.url.replace(/\/$/,'')+'/rest/v1/ople_learning_state';
 const apiHeaders=()=>({'apikey':server.publishableKey,'Content-Type':'application/json'});
-async function fetchCloud(){const response=await fetch(endpoint()+'?username=eq.'+enc(user)+'&select=payload&limit=1',{headers:apiHeaders(),cache:'no-store'});if(!response.ok)throw Error('Lectura '+response.status);const rows=await response.json();return normalize(rows[0]?.payload)}
-async function writeCloud(record){const response=await fetch(endpoint()+'?on_conflict=username',{method:'POST',headers:{...apiHeaders(),'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({username:user,payload:record})});if(!response.ok)throw Error('Escritura '+response.status+' '+(await response.text()).slice(0,130))}
-async function synchronize(){if(!CLOUD||!state||!user||cloudLock)return;cloudLock=true;status='Sincronizando…';syncLabel();try{const fromServer=await fetchCloud();state=mergeStates(state,fromServer);localStorage.setItem(key(user),JSON.stringify(state));await writeCloud(state);status='Sincronizado';syncLabel()}catch(e){status='Sin conexión: datos locales';syncLabel();console.warn('Aula Electoral: no se pudo sincronizar',e.message)}finally{cloudLock=false}}
+async function fetchCloud(target){const response=await fetch(endpoint()+'?username=eq.'+enc(target)+'&select=payload&limit=1',{headers:apiHeaders(),cache:'no-store'});if(!response.ok)throw Error('Lectura '+response.status);const rows=await response.json();return normalize(rows[0]?.payload)}
+async function writeCloud(target,record){const response=await fetch(endpoint()+'?on_conflict=username',{method:'POST',headers:{...apiHeaders(),'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({username:target,payload:record})});if(!response.ok)throw Error('Escritura '+response.status+' '+(await response.text()).slice(0,130))}
+async function synchronize(){
+ if(!CLOUD||!state||!user)return;
+ if(cloudLock){syncPending=true;return}
+ const target=user;
+ cloudLock=true;status='Sincronizando…';syncLabel();
+ try{
+  const fromServer=await fetchCloud(target);
+  if(user!==target)return;
+  const merged=mergeStates(state,fromServer);
+  state=merged;localStorage.setItem(key(target),JSON.stringify(state));
+  await writeCloud(target,merged);
+  if(user!==target)return;
+  // No borrar respuestas introducidas mientras se estaba escribiendo en el servidor.
+  state=mergeStates(state,merged);
+  localStorage.setItem(key(target),JSON.stringify(state));
+  status='Sincronizado';syncLabel();
+  if(['inicio','historial','refuerzo'].includes(page))render();
+ }catch(e){
+  if(user===target){status='Sin conexión: datos locales';syncLabel()}
+  console.warn('Aula Electoral: no se pudo sincronizar',e.message)
+ }finally{
+  cloudLock=false;
+  if(syncPending&&user===target){syncPending=false;scheduleSync()}
+ }
+}
 function scheduleSync(){if(!CLOUD)return;clearTimeout(syncTimer);syncTimer=setTimeout(synchronize,550)}
 function signIn(candidate){const name=candidate.trim();if(!USERS.includes(name))return false;user=name;sessionStorage.setItem(activeStorage,user);state=localRead(user);page='inicio';status=CLOUD?'Conectando…':'Solo en este dispositivo';layout();if(CLOUD){synchronize().then(()=>{if(page==='inicio')render()})}clearInterval(timer);timer=setInterval(tick,1000);return true}
 function signOut(){clearInterval(timer);clearTimeout(syncTimer);user=null;state=null;sessionStorage.removeItem(activeStorage);login()}
@@ -79,5 +103,8 @@ function review(){const qs=weakQuestions();setView(heading('Mis puntos débiles'
 function history(){const h=state.history;setView(heading('Historial de intentos','Cada intento se contabiliza individualmente. Solo aparecen los resultados de tu usuario.')+(h.length?`<section class="panel"><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Modalidad</th><th>Aciertos</th><th>Errores</th><th>Omisiones</th><th>Calificación</th><th></th></tr></thead><tbody>${h.map(x=>`<tr><td>${new Date(x.ended).toLocaleString('es-MX')}</td><td>${esc(x.type)}</td><td>${x.correct}</td><td>${x.incorrect}</td><td>${x.omitted}</td><td>${Math.round(x.correct/x.questions.length*100)}%</td><td><button class="btn ghost" data-result="${esc(x.id)}">Detalles</button></td></tr>`).join('')}</tbody></table></div></section>`:'<section class="panel empty">Todavía no hay intentos terminados.</section>'));$$('[data-result]').forEach(b=>b.onclick=()=>{const a=state.history.find(x=>x.id===b.dataset.result);if(a){page='resultados';results(a)}})}
 function sources(){setView(heading('Fuente documental','Toda la información normativa utilizada procede del PDF de la guía de estudios del OPLEV 2026-2027, proporcionado por el usuario.')+`<div class="panel"><h2>Guía de Estudios 2026–2027</h2><p>Universidad Veracruzana · Centro de Estudios de Opinión y Análisis · Octubre de 2026.</p><p class="muted">El banco contiene ${Q.length} preguntas propias con cuatro opciones, fundamentadas en artículos y páginas verificables. No constituye un examen oficial. El texto de la guía es la única fuente académica utilizada.</p><div class="actions"><a class="btn primary" href="Guia_estudio_2026.pdf" target="_blank" rel="noopener">Abrir PDF original</a><button class="btn ghost" id="goStudy">Consultar temario en la página</button></div></div><div class="panel"><h2>Perfiles y sincronización</h2><p>Los perfiles Rosario y LuisOrta mantienen resultados independientes.</p>${CLOUD?'<p class="muted">La base de datos está configurada. La parte superior indica el resultado de la última sincronización.</p>':'<div class="notice">La sincronización remota todavía no está activada. El progreso queda guardado por usuario en el navegador actual; para verlo desde otro dispositivo hace falta completar la conexión con la base de datos. No se presenta como una sincronización funcional hasta entonces.</div>'}<p class="small muted">El acceso por nombre de usuario, sin una contraseña, no impide que otra persona que conozca ese nombre pueda acceder a ese perfil.</p></div>`);$('#goStudy').onclick=()=>navigate('estudio')}
 function render(){if(!user){login();return}const loc={inicio:'PANORAMA',estudio:'TEMARIO',practica:'PRÁCTICA',simulacro:'SIMULACRO',refuerzo:'REFUERZO',historial:'HISTORIAL',fuentes:'FUENTE DOCUMENTAL',resultados:'RESULTADOS'};$('#location').textContent=loc[page]||'ESTUDIO';$$('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===page));if(state.active&&(page==='practica'||page==='simulacro'||page==='refuerzo')){showQuestion();return}if(page==='inicio')dashboard();else if(page==='estudio')library();else if(page==='practica')setup('practica');else if(page==='simulacro')setup('simulacro');else if(page==='refuerzo')review();else if(page==='historial')history();else if(page==='fuentes')sources();else dashboard()}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&CLOUD&&user)synchronize()});
+window.addEventListener('focus',()=>{if(CLOUD&&user)synchronize()});
+setInterval(()=>{if(CLOUD&&user&&!document.hidden)synchronize()},30000);
 if(user)signIn(user);else login();
 })();
