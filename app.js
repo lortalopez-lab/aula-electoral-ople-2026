@@ -59,7 +59,7 @@ function el(tag,cls='',content=''){const e=document.createElement(tag);e.classNa
 function intro(title,text){return '<div class="hero"><div class="kicker">FUENTE ÚNICA · GUÍA OPLEV · OCTUBRE 2026</div><h1>'+esc(title)+'</h1><p>'+esc(text)+'</p></div>'}
 function dashboard(){
  const h=state.history,answered=h.reduce((a,x)=>a+x.total,0),good=h.reduce((a,x)=>a+x.correct,0),bad=Object.values(state.misses).filter(x=>x>0).length;
- app(intro('Tu preparación electoral, sin fuentes externas','Estudia los nueve apartados de la guía de la Universidad Veracruzana para el examen de Consejos Distritales. Los reactivos son ejercicios originales de reconocimiento del texto y artículos, no preguntas oficiales.')+
+ app(
  '<div class="stats-grid"><div class="stat"><strong>'+bank.length+'</strong><span>Reactivos con fragmentos de la guía</span></div><div class="stat"><strong>9</strong><span>Apartados normativos</span></div><div class="stat"><strong>'+h.length+'</strong><span>Intentos terminados</span></div><div class="stat"><strong>'+(answered?Math.round(100*good/answered):0)+'%</strong><span>Acierto acumulado</span></div></div>'+
  '<div class="panel"><h3>Comienza a estudiar</h3><p class="muted">El simulacro contiene 50 preguntas y dura 120 minutos. Al equivocarte recibirás la respuesta y la referencia precisa de página, con la recomendación de volver a leer el fragmento.</p><div class="btnrow" id="actions"></div></div>'+
  '<div class="grid"><div class="panel"><h3>Texto de estudio</h3><p class="muted">Consulta los extractos de la guía, ordenados por norma y página del PDF.</p></div><div class="panel"><h3>Repaso dirigido</h3><p class="muted">'+bad+' preguntas señaladas para reforzar, según tus intentos anteriores.</p></div></div>');
