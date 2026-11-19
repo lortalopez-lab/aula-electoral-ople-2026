@@ -18,7 +18,7 @@ El archivo completo, **Guia_estudio_2026.pdf** (127 páginas), está incluido en
 - Acceso por nombre de usuario: **Rosario** o **LuisOrta**. No se muestran las cuentas disponibles; cada perfil conserva estadísticas separadas.
 
 ## Guardado y sincronización
-Por ahora, cada usuario guarda sus datos **en el navegador del dispositivo**, no entre dispositivos. La sincronización entre celular y computadora **todavía no está activada**. Es necesario habilitar un proyecto de base de datos independiente con control de acceso antes de anunciarla como funcional. El archivo `sync-config.js` contiene los parámetros públicos de configuración y permanece vacío hasta completar esa integración.
+La plataforma está conectada con el proyecto **EstudioOple** en Supabase. Las respuestas, intentos, preguntas pendientes y apartados estudiados se conservan por separado para `Rosario` y `LuisOrta` y se sincronizan al entrar, durante el estudio y al volver a abrir la pestaña. Existe copia local para fallos de conexión. **Importante:** el acceso es únicamente mediante nombre de usuario, sin contraseña; sirve para organizar perfiles, pero no ofrece autenticación ni privacidad frente a terceros. Cualquiera con acceso al sitio puede introducir el nombre de uno de los perfiles. Si se requiere protección real, debe añadirse autenticación individual.
 
 El acceso solo por nombre de usuario **no es autenticación segura**: otra persona que conozca el nombre podría acceder al perfil. Para privacidad real se necesita un factor de autenticación adicional, como PIN o contraseña.
 
