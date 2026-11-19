@@ -67,13 +67,15 @@ function heading(title,description,flag='ESTUDIA CON LA GUÍA OFICIAL'){return `
 function button(label,callback,cls='primary',container){const b=document.createElement('button');b.type='button';b.className='btn '+cls;b.textContent=label;b.onclick=callback;container.append(b);return b}
 function setView(html){$('#main').innerHTML=html;syncLabel()}
 function articleMetrics(){
- const sourceArticles=ARTICLE_INDEX.length?ARTICLE_INDEX.map(x=>x.id):[...new Set(Q.map(q=>q.topic+':'+q.article))];
- const bankArticles=new Set(Q.map(q=>q.topic+':'+q.article));
+ const sourceArticles=ARTICLE_INDEX.length?[...new Set(ARTICLE_INDEX.map(x=>x.id))]:[...new Set(Q.map(q=>q.topic+':'+q.article))];
+ const catalog=new Set(sourceArticles);
+ const bankArticles=new Set(Q.map(q=>q.topic+':'+q.article).filter(id=>catalog.has(id)));
  const observations=new Map();
  const history=[...state.history].sort((a,b)=>(a.ended||0)-(b.ended||0));
  for(const h of history){for(const id of h.questions||[]){
   const q=find(id),answer=h.answers?.[id];if(!q||answer===undefined)continue;
   const article=q.topic+':'+q.article;
+  if(!catalog.has(article))continue;
   const rec=observations.get(article)||{attempts:0,correct:0,lastCorrect:false};
   rec.attempts++;if(answer===0)rec.correct++;rec.lastCorrect=answer===0;
   observations.set(article,rec);
