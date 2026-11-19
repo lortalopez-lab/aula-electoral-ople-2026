@@ -8,7 +8,7 @@ Plataforma independiente de estudio para el examen de conocimientos de aspirante
 El archivo completo, **Guia_estudio_2026.pdf** (127 páginas), está incluido en este repositorio. Los fundamentos de las respuestas se comprueban contra el texto del PDF aportado; no se utilizan leyes ni fuentes externas.
 
 ## Versión 2
-- **146 reactivos didácticos verificados**: 68 de conocimiento normativo, 54 de identificación de artículos y 24 casos prácticos. Son ejercicios propios, no preguntas oficiales.
+- **455 reactivos didácticos de conocimiento, identificación normativa y aplicación, con referencias contrastadas contra la guía: 253 de conocimiento, 119 de identificación de artículos y 83 de aplicación.
 - Cuatro opciones y una explicación con artículo/ordenamiento, evidencia literal y página del PDF.
 - Preguntas autónomas, sin encabezados que revelen la respuesta y sin fragmentos truncados.
 - Estudio completo de los nueve apartados normativos, buscador y seguimiento de apartados estudiados.
